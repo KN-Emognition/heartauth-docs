@@ -1,0 +1,61 @@
+Table tenants {
+  id UUID [pk]
+  tenant_id UUID [unique, not null]
+  created_at TIMESTAMPTZ [not null]
+  updated_at TIMESTAMPTZ [not null]
+}
+
+Table tenant_api_keys {
+  id UUID [pk]
+  tenants_fk UUID [ref: > tenants.id, not null]
+  key_hash TEXT [not null]
+  created_at TIMESTAMPTZ [not null]
+  updated_at TIMESTAMPTZ [not null]
+  Indexes {
+    (tenants_fk, key_hash) [unique]
+  }
+}
+
+Table app_user {
+  id UUID [pk]
+  tenants_fk UUID [ref: > tenants.id, not null]
+  user_id UUID [not null]
+  created_at TIMESTAMPTZ [not null]
+  updated_at TIMESTAMPTZ [not null]
+  Indexes {
+    (tenants_fk, user_id) [unique]
+  }
+}
+
+Enum platform_enum {
+  ANDROID
+  IOS
+}
+
+Table user_device {
+  id UUID [pk]
+  app_user_fk UUID [ref: > app_user.id, not null]
+  device_id TEXT [not null]
+  display_name TEXT [not null]
+  public_key_pem TEXT [not null]
+  fcm_token TEXT
+  platform platform_enum [not null]
+  os_version TEXT
+  model TEXT
+  created_at TIMESTAMPTZ [not null]
+  updated_at TIMESTAMPTZ [not null]
+  Indexes {
+    (app_user_fk, device_id) [unique]
+  }
+}
+
+Table ecg_ref_data {
+  id UUID [pk]
+  app_user_fk UUID [ref: > app_user.id, not null]
+  ecg_data JSONB [not null]
+  created_at TIMESTAMPTZ [not null]
+  updated_at TIMESTAMPTZ [not null]
+  Indexes {
+    (app_user_fk) [unique]
+  }
+}

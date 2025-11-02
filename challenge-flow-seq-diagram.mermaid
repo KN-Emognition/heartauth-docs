@@ -1,0 +1,70 @@
+sequenceDiagram
+    autonumber
+    actor U as User
+    participant W as WearOS App
+    participant M as Mobile App
+    participant KC as Tenant System
+    participant IO as Orchestrator
+    participant PG as Postgres
+    participant RD as Redis
+    participant FCM as Firebase Cloud Messaging
+    participant KF as Kafka Broker
+    participant MA as Model API
+
+    U->>KC: REST: {GET} Open login page
+    KC->>IO: REST: {POST} createChallenge(userId)
+
+    IO-)PG: JDBC: SELECT user_device(userId)
+    alt no deviceCredential 
+        PG--)IO: JDBC: Response
+        IO-->>KC: REST: Error: no registered device
+        KC-->>U: Login failed (no device)
+    else user device credentials exist
+        PG--)IO: JDBC: Response
+        IO->>RD: Create challenge(challengeId, status="CREATED")
+        IO->>FCM: FIREBASE: Send push notification(challengeId, userId)
+        FCM-->>M: FIREBASE: Notification delivered(challengeId)
+            M->>W: DATALAYER: Request ECG measurement(challengeId)
+        W->>U: Prompt: "Start ECG measurement"
+        U-->>W: User performs ECG measurement
+        W-->>M: DATALAYER: ECG data
+        M->>IO: REST: {POST} completeChallenge(challengeId, payload)
+        IO-)RD: REDIS: Verify challenge exists(challengeId)
+        alt challenge present
+            RD--)IO: REDIS: OK (CREATED)
+            IO-)PG: JDBC: SELECT ecg_ref_data(userId)
+            alt ecg reference data exist
+                PG--)IO: JDBC: Response
+                IO->>RD: REDIS: Update status(challengeId, status="PENDING")
+                IO->>KF: KAFKA: PredictRequest(payload)
+                KF->>MA: KAFKA: PredictRequest(payload)
+                MA->>KF: KAFKA: PredictResponse(TRUE/FALSE)
+                KF->>IO: KAFKA: PredictResponse(TRUE/FALSE)
+                IO->>RD: REDIS: Update status(challengeId=APPROVED/DENIED)
+                loop Poll until timIOut or status != PENDING
+                    IO->>RD: REDIS: Read status(challengeId)
+                    RD-->>IO: REDIS: status (PENDING/APPROVED/DENIED)
+                end
+                IO->>M: REST: status(APPROVED/DENIED)
+            else
+                PG--)IO: JDBC: Response
+                IO-->>M: REST: Error: ecg reference data not found
+            end
+        else missing/expired
+            RD-->>IO: REDIS: NOT FOUND/EXPIRED
+            IO-->>M: REST: Error: invalid challenge
+        end 
+
+        loop Poll until timIOut or status != PENDING
+                KC->>IO: REST: {GET} getChallengeStatus(id)
+                IO->>RD: REDIS: Read status(challengeId)
+                RD-->>IO: REDIS: status (PENDING/APPROVED/DENIED)
+                IO-->>KC: REST: StatusResponse
+        end
+
+        alt status == APPROVED
+            KC-->>U: REST: Login success
+        else timIOut or status == DENIED
+            KC-->>U: REST: Login failed
+        end
+    end

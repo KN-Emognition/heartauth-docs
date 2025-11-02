@@ -1,0 +1,56 @@
+Project HeartAuth_Redis_States {
+  database_type: "redis"
+  Note: 'Transient Redis objects representing pairing and challenge states'
+}
+
+Enum FlowStatus {
+  CREATED
+  PENDING
+  APPROVED
+  DENIED
+  EXPIRED
+  NOT_FOUND
+}
+
+Enum Platform {
+  ANDROID
+  IOS
+}
+
+Table PairingState {
+  id UUID [pk]
+  tenantId UUID [note: 'Tenant identifier' ]
+  userId UUID [note: 'User identifier' ]
+  status FlowStatus
+  reason String
+  deviceId String
+  displayName String
+  publicKey String
+  fcmToken String
+  platform Platform
+  osVersion String
+  model String
+  nonceB64 String
+  exp Long
+  createdAt Long
+  ttlSeconds Long [note: 'Time To Live (seconds)']
+
+  Note: 'Represents the pairing flow state stored in Redis with TTL'
+}
+
+Table ChallengeState {
+  id UUID [pk]
+  tenantId UUID [note: 'Tenant identifier']
+  userId UUID [note: 'User identifier' ]
+  status FlowStatus
+  reason String
+  ephemeralPrivateKey String
+  userPublicKey String
+  nonceB64 String
+  modelApiTryId UUID [ note: 'Reference to model API attempt']
+  exp Long
+  createdAt Long
+  ttlSeconds Long [note: 'Time To Live (seconds)']
+
+  Note: 'Represents the login challenge flow state stored in Redis with TTL'
+}
