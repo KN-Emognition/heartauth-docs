@@ -11,24 +11,34 @@ sequenceDiagram
     participant KF as Kafka Broker
     participant MA as Model API
 
-    U->>KC: REST: Open login page
-    KC->>IO: REST: {POST} createChallenge(userId)
+    U->>KC: Open registration page
+    KC->>IO: REST: {POST} createPairing
 
-    IO-)PG: JDBC: SELECT user_device(userId)
-    alt no deviceCredential 
+    IO-)PG: JDBC: SELECT app_user(userId, tenantId)
+    alt user already exists 
         PG--)IO: JDBC: Response
-        IO-->>KC: REST: Error: no registered device
-        KC-->>U: Login failed (no device)
-    else user device credentials exist
+        IO-->>KC: REST: Error: user already exists
+        KC-->>U: Registration failed (user exists)
+    else user doesn't exist yet
         PG--)IO: JDBC: Response
-        IO->>RD: Create challenge(challengeId, status="CREATED")
-        IO->>FCM: FIREBASE: Send push notification(challengeId, userId)
-        FCM-->>M: FIREBASE: Notification delivered(challengeId)
-            M->>W: DATALAYER: Request ECG measurement(challengeId)
+        IO->>RD: Create pairing(tenantId, userId, jti, status="CREATED", reason="FLOW_CREATED")
+        IO->>KC: REST: PairingCreatedResponse(pairingId)
+        KC-->>U: Show pairing QR code
+        U->>M: Scan pairing QR code
+        M->>IO: REST: {POST} initPairing
+        IO->>RD: REDIS: Verify pairing exists(pairingId)
+        alt pairing not found, expired or already initalized
+            RD-->>IO: REDIS: NOT FOUND/EXPIRED
+            IO-->>M: REST: Error: invalid pairing
+            M-->>U: Pairing failed (invalid pairing)
+        else pairing present
+        IO->>RD: REDIS: Update pairing(pairingId, deviceInfo, status="PENDING", reason="FLOW_INITIALIZED_ON_MOBILE_DEVICE")
+        IO-->>M: REST: PairingInitializedResponse(nonce, expiryTime)
+        M->>W: DATALAYER: Request ECG measurement(challengeId)
         W->>U: Prompt: "Start ECG measurement"
         U-->>W: User performs ECG measurement
         W-->>M: DATALAYER: ECG data
-        M->>IO: REST: {POST} completeChallenge(challengeId, payload)
+        M->>IO: REST: {POST} completePairing(ecgData, nonceSignature)
         IO-)RD: REDIS: Verify challenge exists(challengeId)
         alt challenge present
             RD--)IO: REDIS: OK (CREATED)
@@ -66,5 +76,6 @@ sequenceDiagram
             KC-->>U: Login success
         else timIOut or status == DENIED
             KC-->>U: Login failed
+        end
         end
     end

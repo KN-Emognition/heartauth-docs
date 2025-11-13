@@ -1,3 +1,13 @@
+# Diagram Sekwencji dla flow logowania
+
+* Komunikacja **REST API** z ```Orchestrator``` odbywa się zgodnie z [kontraktem wewnętrznym](https://github.com/KN-Emognition/orchestrator/blob/master/contract/internal.yml) oraz [kontraktem zewnętrznym](https://github.com/KN-Emognition/orchestrator/blob/master/contract/external.yml)
+* Komunikacja z ```Redis``` odbywa się zgodnie z kontraktem Redis
+* Komunikacja **DataLayer API** między ```Mobile App``` oraz ```WearOS App``` odbywa się zgodnie z kontraktem DataLayer
+* Komunikacja ```Firebase Cloud Messaging``` z ```Orchestrator``` oraz ```Mobile app``` odbywa się zgodnie z kontraktem FCM
+* Komunikacja z ```Kafka Broker``` odbywa się zgodnie z [kontraktem Kafka](https://github.com/KN-Emognition/orchestrator/blob/master/contract/model-api-kafka.yml)
+* Nazwy wywoływanych operacji REST API odpowiadają **id** operacji zdefiniowanych w ww. kontraktach
+
+```mermaid
 sequenceDiagram
     autonumber
     actor U as User
@@ -68,3 +78,4 @@ sequenceDiagram
             KC-->>U: Login failed
         end
     end
+```
