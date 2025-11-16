@@ -21,7 +21,7 @@ sequenceDiagram
     participant KF as Kafka Broker
     participant MA as Model API
 
-    U->>KC: REST: Open login page
+    U->>KC: Open login page
     KC->>IO: REST: {POST} createChallenge(userId)
 
     IO-)PG: JDBC: SELECT user_device(userId)
@@ -41,7 +41,7 @@ sequenceDiagram
         M->>IO: REST: {POST} completeChallenge(challengeId, payload)
         IO-)RD: REDIS: Verify challenge exists(challengeId)
         alt challenge present
-            RD--)IO: REDIS: OK (CREATED)
+            RD--)IO: REDIS: Response
             IO-)PG: JDBC: SELECT ecg_ref_data(userId)
             alt ecg reference data exist
                 PG--)IO: JDBC: Response
@@ -51,8 +51,8 @@ sequenceDiagram
                 MA->>KF: KAFKA: PredictResponse(TRUE/FALSE)
                 KF->>IO: KAFKA: PredictResponse(TRUE/FALSE)
                 IO->>RD: REDIS: Update status(challengeId=APPROVED/DENIED)
-                loop Poll until timIOut or status != PENDING
-                    IO->>RD: REDIS: Read status(challengeId)
+                loop Poll until timeout or status != PENDING
+                    IO->>RD: REDIS: Get status(challengeId)
                     RD-->>IO: REDIS: status (PENDING/APPROVED/DENIED)
                 end
                 IO->>M: REST: status(APPROVED/DENIED)
@@ -61,20 +61,20 @@ sequenceDiagram
                 IO-->>M: REST: Error: ecg reference data not found
             end
         else missing/expired
-            RD-->>IO: REDIS: NOT FOUND/EXPIRED
+            RD-->>IO: REDIS: Response
             IO-->>M: REST: Error: invalid challenge
         end 
 
-        loop Poll until timIOut or status != PENDING
+        loop Poll until timeout or status != PENDING
                 KC->>IO: REST: {GET} getChallengeStatus(id)
-                IO->>RD: REDIS: Read status(challengeId)
+                IO->>RD: REDIS: Get status(challengeId)
                 RD-->>IO: REDIS: status (PENDING/APPROVED/DENIED)
                 IO-->>KC: REST: StatusResponse
         end
 
         alt status == APPROVED
             KC-->>U: Login success
-        else timIOut or status == DENIED
+        else timeout or status == DENIED
             KC-->>U: Login failed
         end
     end

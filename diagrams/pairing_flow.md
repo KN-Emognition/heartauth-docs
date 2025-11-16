@@ -3,8 +3,6 @@
 * Komunikacja **REST API** z ```Orchestrator``` odbywa się zgodnie z [kontraktem wewnętrznym](https://github.com/KN-Emognition/orchestrator/blob/master/contract/internal.yml) oraz [kontraktem zewnętrznym](https://github.com/KN-Emognition/orchestrator/blob/master/contract/external.yml)
 * Komunikacja z ```Redis``` odbywa się zgodnie z kontraktem Redis
 * Komunikacja **DataLayer API** między ```Mobile App``` oraz ```WearOS App``` odbywa się zgodnie z kontraktem DataLayer
-* Komunikacja ```Firebase Cloud Messaging``` z ```Orchestrator``` oraz ```Mobile app``` odbywa się zgodnie z kontraktem FCM
-* Komunikacja z ```Kafka Broker``` odbywa się zgodnie z [kontraktem Kafka](https://github.com/KN-Emognition/orchestrator/blob/master/contract/model-api-kafka.yml)
 * Nazwy wywoływanych operacji REST API odpowiadają **id** operacji zdefiniowanych w ww. kontraktach
 
 ```mermaid
@@ -17,65 +15,60 @@ sequenceDiagram
     participant IO as Orchestrator
     participant PG as Postgres
     participant RD as Redis
-    participant FCM as Firebase Cloud Messaging
-    participant KF as Kafka Broker
-    participant MA as Model API
 
-    U->>KC: REST: {GET} Open login page
-    KC->>IO: REST: {POST} createChallenge(userId)
 
-    IO-)PG: JDBC: SELECT user_device(userId)
-    alt no deviceCredential 
+    U->>KC: Open registration page
+    KC->>IO: REST: {POST} createPairing
+
+    IO-)PG: JDBC: SELECT app_user(userId, tenantId)
+    alt user already exists 
         PG--)IO: JDBC: Response
-        IO-->>KC: REST: Error: no registered device
-        KC-->>U: Login failed (no device)
-    else user device credentials exist
+        IO-->>KC: REST: Error: user already exists
+        KC-->>U: Registration failed (user exists)
+    else user doesn't exist yet
         PG--)IO: JDBC: Response
-        IO->>RD: Create challenge(challengeId, status="CREATED")
-        IO->>FCM: FIREBASE: Send push notification(challengeId, userId)
-        FCM-->>M: FIREBASE: Notification delivered(challengeId)
+        IO->>RD: Create pairing(tenantId, userId, jti, status="CREATED", reason="FLOW_CREATED")
+        IO->>KC: REST: PairingCreatedResponse(pairingId)
+        KC-->>U: Show pairing QR code
+        U->>M: Scan pairing QR code
+        M->>IO: REST: {POST} initPairing
+        IO->>RD: REDIS: Get pairing(pairingId)
+        alt pairing not found, expired or already initalized
+            RD->>IO: REDIS: Response
+            IO-->>M: REST: Error: invalid pairing
+            M-->>U: Pairing failed
+        else pairing present
+            RD->>IO: REDIS: Response
+            IO->>RD: REDIS: Update pairing(pairingId, deviceInfo, status="PENDING", reason="FLOW_INITIALIZED_ON_MOBILE_DEVICE")
+            IO-->>M: REST: PairingInitializedResponse(nonce, expiryTime)
             M->>W: DATALAYER: Request ECG measurement(challengeId)
-        W->>U: Prompt: "Start ECG measurement"
-        U-->>W: User performs ECG measurement
-        W-->>M: DATALAYER: ECG data
-        M->>IO: REST: {POST} completeChallenge(challengeId, payload)
-        IO-)RD: REDIS: Verify challenge exists(challengeId)
-        alt challenge present
-            RD--)IO: REDIS: OK (CREATED)
-            IO-)PG: JDBC: SELECT ecg_ref_data(userId)
-            alt ecg reference data exist
-                PG--)IO: JDBC: Response
-                IO->>RD: REDIS: Update status(challengeId, status="PENDING")
-                IO->>KF: KAFKA: PredictRequest(payload)
-                KF->>MA: KAFKA: PredictRequest(payload)
-                MA->>KF: KAFKA: PredictResponse(TRUE/FALSE)
-                KF->>IO: KAFKA: PredictResponse(TRUE/FALSE)
-                IO->>RD: REDIS: Update status(challengeId=APPROVED/DENIED)
-                loop Poll until timIOut or status != PENDING
-                    IO->>RD: REDIS: Read status(challengeId)
-                    RD-->>IO: REDIS: status (PENDING/APPROVED/DENIED)
+            W->>U: Prompt: "Start ECG measurement"
+            U-->>W: User performs ECG measurement
+            W-->>M: DATALAYER: ECG data
+            M->>IO: REST: {POST} completePairing(ecgData, nonceSignature)
+            IO-)RD: REDIS: Get pairing(pairingId)
+            alt pairing not found, expired, already completed, is not pending or doesn't match the tenant
+                RD->>IO: REDIS: Response
+                IO-->>M: REST: Error: invalid pairing
+                M-->>U: Pairing failed
+            else pairing present
+                RD->>IO: REDIS: Response
+                IO->>PG: JDBC: INSERT INTO app_user(userId, tenantId, deviceInfo)
+                IO->>RD: REDIS: Update pairing(pairingId, status="APPROVED", reason="FLOW_COMPLETED_SUCCESSFULLY")
+
+                loop Poll until timeout or (status != PENDING and status != CREATED)
+                    KC->>IO: REST: {GET} getPairingStatus(pairingId)
+                    IO->>RD: REDIS: Get pairing(pairingId)
+                    RD-->>IO: REDIS: Response
+                    IO-->>KC: REST: PairingStatusResponse
                 end
-                IO->>M: REST: status(APPROVED/DENIED)
-            else
-                PG--)IO: JDBC: Response
-                IO-->>M: REST: Error: ecg reference data not found
             end
-        else missing/expired
-            RD-->>IO: REDIS: NOT FOUND/EXPIRED
-            IO-->>M: REST: Error: invalid challenge
-        end 
 
-        loop Poll until timIOut or status != PENDING
-                KC->>IO: REST: {GET} getChallengeStatus(id)
-                IO->>RD: REDIS: Read status(challengeId)
-                RD-->>IO: REDIS: status (PENDING/APPROVED/DENIED)
-                IO-->>KC: REST: StatusResponse
-        end
-
-        alt status == APPROVED
-            KC-->>U: REST: Login success
-        else timIOut or status == DENIED
-            KC-->>U: REST: Login failed
+            alt status == APPROVED
+                KC-->>U: Login success
+            else timeout, status == DENIED or status==EXPIRED
+                KC-->>U: Login failed
+            end
         end
     end
 ```
