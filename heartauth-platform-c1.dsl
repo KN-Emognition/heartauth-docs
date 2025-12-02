@@ -19,7 +19,7 @@ workspace "HeartAuth Context" "C1 System Context" {
         mobile -> watch "requests ECG Data read"
         tenant_system -> hearthauth_core "Delegates 2FA to HeartAuth Core"
         hearthauth_core -> fcm_system "Sends push notifications"
-        fcm_system -> user_auth "Delivers notifications to mobile device"
+        fcm_system -> mobile "Delivers notifications to mobile device"
     }
 
     views {
@@ -31,7 +31,7 @@ workspace "HeartAuth Context" "C1 System Context" {
             include user_auth
             include watch
             include mobile
-            autolayout lr
+            autolayout tb
             title "System Context for HeartAuth"
             description "User interact with HeartAuth; tenant systems delegate 2FA authentication; Core uses FCM for push notifications."
         }
